@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dicoding Story</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="A progressive web app for sharing stories with location and photos">
+    <meta name="theme-color" content="#667eea">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Story App">
+    <meta name="msapplication-TileColor" content="#667eea">
+    <meta name="msapplication-tap-highlight" content="no">
+    
+    <!-- Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- Favicons and App Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/icon-128x128.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="/icons/icon-128x128.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="/icons/icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="/icons/icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="/icons/icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="57x57" href="/icons/icon-72x72.png">
+    
+    <!-- Microsoft Tiles -->
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
+    <meta name="msapplication-square70x70logo" content="/icons/icon-72x72.png">
+    <meta name="msapplication-square150x150logo" content="/icons/icon-152x152.png">
+    <meta name="msapplication-wide310x150logo" content="/icons/icon-384x384.png">
+    <meta name="msapplication-square310x310logo" content="/icons/icon-384x384.png">
+    
+    <!-- External CSS - Will be cached by Service Worker -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    
+    <!-- Critical CSS - Inline untuk performa optimal -->
+    <style>
+        /* Critical above-the-fold styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 6px;
+            background: #000;
+            color: #fff;
+            padding: 8px;
+            text-decoration: none;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+
+        .skip-link:focus {
+            top: 6px;
+        }
+
+        header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .logo {
+            font-size: 2rem;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        nav a, nav button {
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            background: transparent;
+            border: 2px solid rgba(255,255,255,0.3);
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        nav a:hover, nav a.active, nav button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        main:focus {
+            outline: none;
+        }
+
+        .page {
+            display: none;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .page.active {
+            display: block;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #667eea;
+        }
+
+        /* Offline Indicators */
+        .offline-indicator, .update-indicator {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #e74c3c;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            z-index: 9999;
+            display: none;
+            animation: slideDown 0.3s ease;
+        }
+
+        .update-indicator {
+            bottom: 20px;
+            top: auto;
+            background: #2c3e50;
+            animation: slideUp 0.3s ease;
+        }
+
+        .offline-indicator.show, .update-indicator.show {
+            display: block;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translate(-50%, -20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translate(-50%, 20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        /* Critical responsive styles */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            nav ul {
+                justify-content: center;
+            }
+
+            main {
+                padding: 1rem;
+            }
+
+            .logo {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Offline Indicator -->
+    <div id="offline-indicator" class="offline-indicator">
+        <i class="fas fa-wifi"></i> You are offline
+    </div>
+
+    <!-- Update Available Indicator -->
+    <div id="update-indicator" class="update-indicator">
+        <i class="fas fa-download"></i> App update available
+        <button id="update-btn" style="background: #3498db; color: white; border: none; padding: 0.5rem 1rem; border-radius: 20px; margin-left: 1rem; cursor: pointer;">Update Now</button>
+    </div>
+
+    <!-- Application Shell Header -->
+    <header role="banner">
+        <a href="#main-content" class="skip-link">Skip to main content</a>
+        <div class="header-content">
+            <h1 class="logo"><i class="fas fa-camera"></i> Dicoding Story</h1>
+            <nav role="navigation" aria-label="Main navigation">
+                <ul>
+                    <li><a href="#home" class="nav-link active">Home</a></li>
+                    <li><a href="#add-story" class="nav-link">Add Story</a></li>
+                    <li><a href="#offline" class="nav-link">Offline</a></li>
+                    <li><a href="#login" class="nav-link" id="auth-link">Login</a></li>
+                    <!-- PWA Install and Notification buttons will be injected here -->
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Application Shell Main Content -->
+    <main id="main-content" role="main" tabindex="-1">
+        <!-- Home Page -->
+        <section id="home-page" class="page active" aria-labelledby="home-title">
+            <h2 id="home-title">Latest Stories</h2>
+            <div id="stories-container" class="loading">
+                <i class="fas fa-spinner fa-spin"></i> Loading stories...
+            </div>
+        </section>
+
+        <!-- Add Story Page -->
+        <section id="add-story-page" class="page" aria-labelledby="add-story-title">
+            <h2 id="add-story-title">Share Your Story</h2>
+            <form id="add-story-form" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="story-description">Story Description</label>
+                    <textarea id="story-description" name="description" rows="4" required
+                              aria-describedby="description-help"></textarea>
+                    <small id="description-help">Tell us about your story</small>
+                </div>
+                
+                <div class="camera-container">
+                    <label for="camera-preview">Photo</label>
+                    <video id="camera-preview" autoplay muted aria-label="Camera preview"></video>
+                    <canvas id="photo-canvas" style="display: none;"></canvas>
+                    <div class="camera-controls">
+                        <button type="button" id="start-camera" class="btn">
+                            <i class="fas fa-video"></i> Start Camera
+                        </button>
+                        <button type="button" id="capture-photo" class="btn btn-secondary" disabled>
+                            <i class="fas fa-camera"></i> Capture Photo
+                        </button>
+                        <button type="button" id="stop-camera" class="btn" disabled>
+                            <i class="fas fa-stop"></i> Stop Camera
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="add-story-map">Select Location (Optional - Click on map)</label>
+                    <div id="add-story-map"></div>
+                    <input type="hidden" id="latitude" name="lat">
+                    <input type="hidden" id="longitude" name="lon">
+                </div>
+
+                <button type="submit" class="btn">
+                    <i class="fas fa-share"></i> Share Story
+                </button>
+            </form>
+        </section>
+
+        <!-- Login Page -->
+        <section id="login-page" class="page" aria-labelledby="login-title">
+            <div class="auth-form">
+                <h2 id="login-title">Login</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-email">Email</label>
+                        <input type="email" id="login-email" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn">Login</button>
+                </form>
+                <p style="text-align: center; margin-top: 1rem;">
+                    Don't have an account? <a href="#register">Register here</a>
+                </p>
+            </div>
+        </section>
+
+        <!-- Register Page -->
+        <section id="register-page" class="page" aria-labelledby="register-title">
+            <div class="auth-form">
+                <h2 id="register-title">Register</h2>
+                <form id="register-form">
+                    <div class="form-group">
+                        <label for="register-name">Name</label>
+                        <input type="text" id="register-name" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">Email</label>
+                        <input type="email" id="register-email" name="email" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Password</label>
+                        <input type="password" id="register-password" name="password" 
+                               minlength="8" required aria-describedby="password-help">
+                        <small id="password-help">Password must be at least 8 characters</small>
+                    </div>
+                    <button type="submit" class="btn">Register</button>
+                </form>
+                <p style="text-align: center; margin-top: 1rem;">
+                    Already have an account? <a href="#login">Login here</a>
+                </p>
+            </div>
+        </section>
+
+        <!-- Offline Page will be injected by OfflineUIManager -->
+    </main>
+
+    <!-- Application Shell Footer -->
+    <footer role="contentinfo">
+        <p>&copy; 2024 Dicoding Story. All rights reserved.</p>
+        <p>Built with ❤️ for Dicoding Submission</p>
+    </footer>
+
+    <!-- External JS - Will be cached by Service Worker -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    
+    <!-- PWA App Scripts -->
+    <script>
+        // Critical PWA functionality - loaded first
+        let deferredPrompt;
+
+        // Handle PWA install prompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+        });
+
+        // Handle online/offline status
+        window.addEventListener('online', () => {
+            document.getElementById('offline-indicator').classList.remove('show');
+        });
+
+        window.addEventListener('offline', () => {
+            document.getElementById('offline-indicator').classList.add('show');
+        });
+
+        // Check initial online status
+        if (!navigator.onLine) {
+            document.getElementById('offline-indicator').classList.add('show');
+        }
+
+        // Handle service worker updates
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                window.location.reload();
+            });
+
+            // Handle update notification
+            navigator.serviceWorker.getRegistration().then(registration => {
+                if (registration) {
+                    registration.addEventListener('updatefound', () => {
+                        const newWorker = registration.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                document.getElementById('update-indicator').classList.add('show');
+                            }
+                        });
+                    });
+                }
+            });
+        }
+
+        // Handle update button click
+        document.getElementById('update-btn').addEventListener('click', () => {
+            document.getElementById('update-indicator').classList.remove('show');
+            
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistration().then(registration => {
+                    if (registration && registration.waiting) {
+                        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                });
+            }
+        });
+
+        // Handle share target (if app was opened via share)
+        if ('URLSearchParams' in window) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sharedTitle = urlParams.get('title');
+            const sharedText = urlParams.get('text');
+            const sharedUrl = urlParams.get('url');
+            
+            if (sharedTitle || sharedText || sharedUrl) {
+                setTimeout(() => {
+                    if (window.location.hash !== '#add-story') {
+                        window.location.hash = '#add-story';
+                    }
+                    
+                    const descriptionField = document.getElementById('story-description');
+                    if (descriptionField && (sharedTitle || sharedText)) {
+                        descriptionField.value = [sharedTitle, sharedText, sharedUrl]
+                            .filter(Boolean)
+                            .join(' - ');
+                    }
+                }, 1000);
+            }
+        }
+    </script>
+    
+    <!-- Main Application - Load after critical scripts -->
+    <script type="module" src="./js/app.js"></script>
+</body>
+</html>
