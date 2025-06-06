@@ -2,61 +2,25 @@
   "name": "Dicoding Story App",
   "short_name": "Story App",
   "description": "A progressive web app for sharing stories with location and photos",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#667eea",
   "theme_color": "#667eea",
   "orientation": "portrait-primary",
-  "scope": "/",
+  "scope": "./",
   "lang": "id",
   "dir": "ltr",
   "icons": [
     {
-      "src": "/icons/icon-72x72.png",
-      "sizes": "72x72",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-96x96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-128x128.png",
-      "sizes": "128x128",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-144x144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-152x152.png",
-      "sizes": "152x152",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-192x192.png",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' fill='%23667eea'/><text x='96' y='96' text-anchor='middle' dominant-baseline='central' font-size='80' fill='white'>📷</text></svg>",
       "sizes": "192x192",
-      "type": "image/png",
+      "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-384x384.png",
-      "sizes": "384x384",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icons/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%23667eea'/><text x='256' y='256' text-anchor='middle' dominant-baseline='central' font-size='200' fill='white'>📷</text></svg>",
+      "sizes": "512x512", 
+      "type": "image/svg+xml",
       "purpose": "any maskable"
     }
   ],
@@ -65,88 +29,23 @@
       "name": "Add New Story",
       "short_name": "Add Story",
       "description": "Quickly add a new story",
-      "url": "/#add-story",
-      "icons": [
-        {
-          "src": "/icons/icon-192x192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
+      "url": "./#add-story"
     },
     {
-      "name": "View Stories",
+      "name": "View Stories", 
       "short_name": "Stories",
       "description": "View all stories",
-      "url": "/#home",
-      "icons": [
-        {
-          "src": "/icons/icon-192x192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
+      "url": "./#home"
     }
   ],
   "categories": ["social", "photo", "lifestyle"],
-  "screenshots": [
-    {
-      "src": "/screenshots/home-desktop.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Home page showing stories with map"
-    },
-    {
-      "src": "/screenshots/home-mobile.png",
-      "sizes": "375x667",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Mobile home page"
-    },
-    {
-      "src": "/screenshots/add-story-mobile.png",
-      "sizes": "375x667",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Add story page with camera"
-    }
-  ],
-  "features": [
-    "Cross Platform",
-    "Fast",
-    "Simple"
-  ],
-  "edge_side_panel": {
-    "preferred_width": 400
-  },
-  "launch_handler": {
-    "client_mode": ["focus-existing", "auto"]
-  },
-  "related_applications": [],
-  "prefer_related_applications": false,
-  "protocol_handlers": [
-    {
-      "protocol": "web+story",
-      "url": "/#story=%s"
-    }
-  ],
   "share_target": {
-    "action": "/#add-story",
+    "action": "./#add-story",
     "method": "GET",
     "params": {
       "title": "title",
-      "text": "text",
+      "text": "text", 
       "url": "url"
     }
-  },
-  "file_handlers": [
-    {
-      "action": "/#add-story",
-      "accept": {
-        "image/*": [".jpg", ".jpeg", ".png", ".webp"]
-      }
-    }
-  ],
-  "handle_links": "preferred"
+  }
 }
