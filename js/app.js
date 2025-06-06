@@ -1588,3 +1588,248 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 });
+
+// Global error boundary for the app
+class AppErrorBoundary {
+    constructor() {
+        this.setupErrorHandlers();
+    }
+
+    setupErrorHandlers() {
+        // Handle JavaScript errors
+        window.addEventListener('error', (e) => {
+            console.error('Global JavaScript error:', e.error);
+            this.handleError(e.error, 'JavaScript Error');
+        });
+
+        // Handle unhandled promise rejections
+        window.addEventListener('unhandledrejection', (e) => {
+            console.error('Unhandled promise rejection:', e.reason);
+            e.preventDefault(); // Prevent default browser error handling
+            this.handleError(e.reason, 'Promise Rejection');
+        });
+    }
+
+    handleError(error, type) {
+        // Don't show error UI for certain expected errors
+        const ignoredErrors = [
+            'Load failed', // Common network errors
+            'NetworkError', // Network issues
+            'AbortError', // Cancelled requests
+            'The operation was aborted' // Aborted operations
+        ];
+
+        const errorMessage = error?.message || error?.toString() || 'Unknown error';
+        
+        if (ignoredErrors.some(ignored => errorMessage.includes(ignored))) {
+            return; // Ignore these errors
+        }
+
+        // Show user-friendly error for critical errors only
+        if (this.isCriticalError(error)) {
+            this.showErrorToUser(errorMessage, type);
+        }
+    }
+
+    isCriticalError(error) {
+        const errorMessage = error?.message || error?.toString() || '';
+        
+        // Critical errors that should be shown to user
+        const criticalPatterns = [
+            'Failed to initialize',
+            'Cannot read propert',
+            'is not a function',
+            'Permission denied',
+            'Storage quota exceeded'
+        ];
+
+        return criticalPatterns.some(pattern => errorMessage.includes(pattern));
+    }
+
+    showErrorToUser(message, type) {
+        // Throttle error messages to avoid spam
+        if (this.lastErrorTime && Date.now() - this.lastErrorTime < 5000) {
+            return;
+        }
+        this.lastErrorTime = Date.now();
+
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-error error-boundary';
+        alertDiv.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            max-width: 350px;
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-radius: 10px;
+            padding: 1rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        `;
+        
+        alertDiv.innerHTML = `
+            <div style="display: flex; align-items: flex-start; gap: 0.5rem;">
+                <i class="fas fa-exclamation-triangle" style="color: #721c24; margin-top: 0.2rem;"></i>
+                <div style="flex: 1;">
+                    <strong>Something went wrong</strong><br>
+                    <small style="opacity: 0.8;">${type}</small>
+                </div>
+                <button onclick="this.parentElement.parentElement.remove()" style="
+                    background: none; 
+                    border: none; 
+                    color: #721c24; 
+                    cursor: pointer;
+                    font-size: 1.2rem;
+                    padding: 0;
+                    line-height: 1;
+                ">&times;</button>
+            </div>
+        `;
+        
+        document.body.appendChild(alertDiv);
+        
+        // Auto-remove after 8 seconds
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.remove();
+            }
+        }, 8000);
+    }
+}
+
+// Safe initialization wrapper
+function safeInit() {
+    try {
+        // Initialize error boundary first
+        new AppErrorBoundary();
+        
+        // Then initialize app
+        window.dicodingStoryApp = new DicodingStoryApp();
+        console.log('🎉 DicodingStoryApp initialized successfully');
+        
+    } catch (error) {
+        console.error('💥 Failed to initialize DicodingStoryApp:', error);
+        showFallbackError(error);
+    }
+}
+
+// Fallback error screen
+function showFallbackError(error) {
+    const errorDetails = error?.message || 'Unknown initialization error';
+    
+    document.body.innerHTML = `
+        <div style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        ">
+            <div style="
+                background: white;
+                border-radius: 15px;
+                padding: 2rem;
+                text-align: center;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                max-width: 90%;
+                width: 400px;
+            ">
+                <div style="color: #e74c3c; font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+                <h2 style="color: #333; margin-bottom: 1rem;">App Initialization Failed</h2>
+                <p style="color: #666; margin-bottom: 1.5rem;">
+                    The app couldn't start properly. This might be due to:
+                </p>
+                <ul style="text-align: left; color: #666; margin-bottom: 1.5rem;">
+                    <li>Missing files</li>
+                    <li>Network connectivity issues</li>
+                    <li>Browser compatibility</li>
+                </ul>
+                <button onclick="window.location.reload()" style="
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    margin-right: 1rem;
+                ">Try Again</button>
+                <details style="margin-top: 1rem; text-align: left;">
+                    <summary style="cursor: pointer; color: #667eea;">Technical Details</summary>
+                    <pre style="
+                        background: #f8f9fa;
+                        padding: 1rem;
+                        border-radius: 5px;
+                        font-size: 0.8rem;
+                        overflow: auto;
+                        margin-top: 0.5rem;
+                    ">${errorDetails}</pre>
+                </details>
+            </div>
+        </div>
+    `;
+}
+
+// Safe Service Worker registration
+async function registerServiceWorkerSafely() {
+    if ('serviceWorker' in navigator) {
+        try {
+            const registration = await navigator.serviceWorker.register('./sw.js');
+            console.log('✅ Service Worker registered successfully');
+            return registration;
+        } catch (error) {
+            console.warn('⚠️ Service Worker registration failed:', error);
+            // App should still work without SW
+            return null;
+        }
+    }
+    return null;
+}
+
+// Initialize when DOM is ready with proper error handling
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', safeInit);
+} else {
+    // DOM already loaded
+    safeInit();
+}
+
+// Register service worker independently
+registerServiceWorkerSafely();
+
+// Development helpers (only in development)
+if (window.location.hostname === 'localhost' || 
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname.includes('netlify') ||
+    window.location.hostname.includes('github.io')) {
+    
+    window.devTools = {
+        getAppInstance: () => window.dicodingStoryApp,
+        getStats: () => window.app?.getAppStats(),
+        exportData: () => window.dicodingStoryApp?.exportAppData(),
+        triggerNotification: () => window.app?.triggerTestNotification(),
+        clearCache: () => window.app?.offlineManager?.clearStorage(),
+        getCapabilities: () => window.dicodingStoryApp?.getPWACapabilities(),
+        getPerformance: () => window.dicodingStoryApp?.getPerformanceMetrics(),
+        forceSync: () => window.dicodingStoryApp?.forceSyncAll(),
+        checkHealth: () => {
+            return {
+                app: !!window.dicodingStoryApp,
+                initialized: window.dicodingStoryApp?.isInitialized,
+                online: navigator.onLine,
+                serviceWorker: 'serviceWorker' in navigator,
+                indexedDB: 'indexedDB' in window
+            };
+        }
+    };
+    
+    console.log('🔧 Development tools available: window.devTools');
+    console.log('💡 Try: window.devTools.checkHealth()');
+}
