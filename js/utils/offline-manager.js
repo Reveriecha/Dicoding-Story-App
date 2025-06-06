@@ -1,4 +1,4 @@
-// Offline Manager - Mengelola fungsi offline dan sync data
+// Offline Manager - Fixed version untuk menangani fungsi offline dan sync data
 export class OfflineManager {
     constructor(indexedDBManager, apiService) {
         this.indexedDBManager = indexedDBManager;
@@ -6,6 +6,7 @@ export class OfflineManager {
         this.isOnline = navigator.onLine;
         this.syncQueue = [];
         this.syncInProgress = false;
+        this.lastSyncAttempt = null;
         
         this.init();
     }
@@ -33,11 +34,15 @@ export class OfflineManager {
         
         // Clear expired cache
         if (this.indexedDBManager) {
-            await this.indexedDBManager.clearExpiredCache();
+            try {
+                await this.indexedDBManager.clearExpiredCache();
+            } catch (error) {
+                console.error('Error clearing expired cache:', error);
+            }
         }
 
         // Sync pending data
-        await this.syncPendingData();
+        await this.syncPendingStories();
         
         // Notify UI
         this.notifyConnectionChange(true);
@@ -112,6 +117,8 @@ export class OfflineManager {
 
         try {
             this.syncInProgress = true;
+            this.lastSyncAttempt = new Date().toISOString();
+            
             const drafts = await this.indexedDBManager.getDrafts();
             const pendingDrafts = drafts.filter(draft => draft.status === 'pending');
 
@@ -127,6 +134,12 @@ export class OfflineManager {
 
             for (const draft of pendingDrafts) {
                 try {
+                    // Skip if no auth token provided
+                    if (!authToken) {
+                        console.log('No auth token, skipping sync for:', draft.id);
+                        continue;
+                    }
+
                     // Prepare FormData
                     const formData = new FormData();
                     formData.append('description', draft.description);
@@ -299,83 +312,6 @@ export class OfflineManager {
         }
     }
 
-    // SYNC QUEUE MANAGEMENT
-
-    // Add operation to sync queue
-    addToSyncQueue(operation) {
-        this.syncQueue.push({
-            ...operation,
-            timestamp: new Date().toISOString()
-        });
-        
-        console.log('Added to sync queue:', operation.type);
-        
-        // Try to sync immediately if online
-        if (this.isAppOnline()) {
-            this.processSyncQueue();
-        }
-    }
-
-    // Process sync queue
-    async processSyncQueue() {
-        if (this.syncQueue.length === 0 || this.syncInProgress) {
-            return;
-        }
-
-        this.syncInProgress = true;
-        
-        try {
-            while (this.syncQueue.length > 0) {
-                const operation = this.syncQueue.shift();
-                
-                try {
-                    await this.processOperation(operation);
-                    console.log('Sync operation completed:', operation.type);
-                } catch (error) {
-                    console.error('Sync operation failed:', operation.type, error);
-                    // Re-add to queue for retry (optional)
-                    // this.syncQueue.unshift(operation);
-                    break;
-                }
-            }
-        } finally {
-            this.syncInProgress = false;
-        }
-    }
-
-    // Process individual sync operation
-    async processOperation(operation) {
-        switch (operation.type) {
-            case 'upload_story':
-                return await this.syncPendingStories(operation.authToken);
-            
-            case 'refresh_stories':
-                // Fetch latest stories and cache them
-                if (operation.authToken) {
-                    const response = await this.apiService.getStories(operation.authToken, 1, 50, 1);
-                    if (response && response.listStory) {
-                        await this.cacheStories(response.listStory);
-                    }
-                }
-                break;
-                
-            default:
-                console.warn('Unknown sync operation:', operation.type);
-        }
-    }
-
-    // SYNC STATUS
-
-    // Get sync status
-    getSyncStatus() {
-        return {
-            isOnline: this.isAppOnline(),
-            syncInProgress: this.syncInProgress,
-            queueLength: this.syncQueue.length,
-            lastSyncAttempt: this.lastSyncAttempt || null
-        };
-    }
-
     // Get pending operations count
     async getPendingOperationsCount() {
         if (!this.indexedDBManager) {
@@ -420,9 +356,6 @@ export class OfflineManager {
                     console.warn('Failed to refresh stories during sync:', error);
                 }
             }
-
-            // Process sync queue
-            await this.processSyncQueue();
 
             return {
                 success: true,
@@ -497,8 +430,7 @@ export class OfflineManager {
 
         try {
             await this.indexedDBManager.clear('cache');
-            await this.indexedDBManager.clear('drafts');
-            // Keep stories and favorites for offline access
+            // Keep stories, favorites, and drafts for offline access
             
             console.log('Storage cleared successfully');
             return true;
@@ -508,94 +440,13 @@ export class OfflineManager {
         }
     }
 
-    // UTILITY METHODS
-
-    // Convert blob to base64 (for storage)
-    blobToBase64(blob) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
-    }
-
-    // Convert base64 to blob (for upload)
-    base64ToBlob(base64, mimeType = 'image/jpeg') {
-        const byteCharacters = atob(base64.split(',')[1]);
-        const byteNumbers = new Array(byteCharacters.length);
-        
-        for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        
-        const byteArray = new Uint8Array(byteNumbers);
-        return new Blob([byteArray], { type: mimeType });
-    }
-
-    // Check storage space availability
-    async checkStorageSpace(requiredBytes = 5 * 1024 * 1024) { // Default 5MB
-        try {
-            if ('storage' in navigator && 'estimate' in navigator.storage) {
-                const estimate = await navigator.storage.estimate();
-                const available = estimate.quota - estimate.usage;
-                
-                return {
-                    hasSpace: available >= requiredBytes,
-                    available: available,
-                    quota: estimate.quota,
-                    usage: estimate.usage,
-                    percentage: (estimate.usage / estimate.quota) * 100
-                };
-            }
-            
-            // If storage estimate not available, assume we have space
-            return { hasSpace: true, available: null };
-        } catch (error) {
-            console.error('Error checking storage space:', error);
-            return { hasSpace: true, available: null };
-        }
-    }
-
-    // Export offline data (for backup)
-    async exportOfflineData() {
-        if (!this.indexedDBManager) {
-            return null;
-        }
-
-        try {
-            const data = await this.indexedDBManager.exportData();
-            return data;
-        } catch (error) {
-            console.error('Error exporting offline data:', error);
-            return null;
-        }
-    }
-
-    // Import offline data (for restore)
-    async importOfflineData(data) {
-        if (!this.indexedDBManager) {
-            return false;
-        }
-
-        try {
-            const success = await this.indexedDBManager.importData(data);
-            return success;
-        } catch (error) {
-            console.error('Error importing offline data:', error);
-            return false;
-        }
-    }
-
-    // Get offline capabilities status
-    getOfflineCapabilities() {
+    // Get sync status
+    getSyncStatus() {
         return {
-            indexedDBSupported: 'indexedDB' in window,
-            serviceWorkerSupported: 'serviceWorker' in navigator,
-            cacheAPISupported: 'caches' in window,
-            storageEstimateSupported: 'storage' in navigator && 'estimate' in navigator.storage,
-            persistentStorageSupported: 'storage' in navigator && 'persist' in navigator.storage,
-            backgroundSyncSupported: 'serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype
+            isOnline: this.isAppOnline(),
+            syncInProgress: this.syncInProgress,
+            queueLength: this.syncQueue.length,
+            lastSyncAttempt: this.lastSyncAttempt
         };
     }
 
@@ -611,6 +462,18 @@ export class OfflineManager {
         }
         
         return capabilities;
+    }
+
+    // Get offline capabilities status
+    getOfflineCapabilities() {
+        return {
+            indexedDBSupported: 'indexedDB' in window,
+            serviceWorkerSupported: 'serviceWorker' in navigator,
+            cacheAPISupported: 'caches' in window,
+            storageEstimateSupported: 'storage' in navigator && 'estimate' in navigator.storage,
+            persistentStorageSupported: 'storage' in navigator && 'persist' in navigator.storage,
+            backgroundSyncSupported: 'serviceWorker' in navigator && 'sync' in window.ServiceWorkerRegistration.prototype
+        };
     }
 
     // Background sync registration (if supported)
@@ -704,5 +567,27 @@ export class OfflineManager {
             pendingOperations: pendingCount,
             lastUpdate: new Date().toISOString()
         };
+    }
+
+    // Export offline data (for backup)
+    async exportOfflineData() {
+        try {
+            const data = await this.indexedDBManager.exportData();
+            return data;
+        } catch (error) {
+            console.error('Error exporting offline data:', error);
+            return null;
+        }
+    }
+
+    // Import offline data (for restore)
+    async importOfflineData(data) {
+        try {
+            const success = await this.indexedDBManager.importData(data);
+            return success;
+        } catch (error) {
+            console.error('Error importing offline data:', error);
+            return false;
+        }
     }
 }
