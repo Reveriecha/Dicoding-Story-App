@@ -1,6 +1,7 @@
-// Minimal Working Service Worker
-const CACHE_NAME = 'dicoding-story-v1';
-const API_CACHE_NAME = 'dicoding-story-api-v1';
+// Enhanced Service Worker with Better Cache Management
+const CACHE_VERSION = 2; // Increment this to force cache update
+const CACHE_NAME = `dicoding-story-v${CACHE_VERSION}`;
+const API_CACHE_NAME = `dicoding-story-api-v${CACHE_VERSION}`;
 
 // Files to cache
 const urlsToCache = [
@@ -34,7 +35,14 @@ self.addEventListener('install', (event) => {
         caches.open(CACHE_NAME)
             .then((cache) => {
                 console.log('Service Worker: Caching files');
-                return cache.addAll(urlsToCache);
+                // Cache files one by one to handle failures gracefully
+                return Promise.all(
+                    urlsToCache.map(url => {
+                        return cache.add(url).catch(error => {
+                            console.warn(`Failed to cache ${url}:`, error);
+                        });
+                    })
+                );
             })
             .then(() => {
                 console.log('Service Worker: All files cached');
@@ -54,7 +62,10 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== CACHE_NAME && cacheName !== API_CACHE_NAME) {
+                    // Delete old caches
+                    if (cacheName.startsWith('dicoding-story-') && 
+                        cacheName !== CACHE_NAME && 
+                        cacheName !== API_CACHE_NAME) {
                         console.log('Service Worker: Deleting old cache', cacheName);
                         return caches.delete(cacheName);
                     }
@@ -67,7 +78,7 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// Fetch event
+// Fetch event with network-first strategy for HTML
 self.addEventListener('fetch', (event) => {
     const { request } = event;
     const url = new URL(request.url);
@@ -77,18 +88,53 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Skip chrome extension requests
+    if (url.protocol === 'chrome-extension:') {
+        return;
+    }
+
     // Handle API requests
     if (url.origin === 'https://story-api.dicoding.dev') {
         event.respondWith(handleApiRequest(request));
         return;
     }
 
-    // Handle other requests
+    // Network-first strategy for HTML documents
+    if (request.mode === 'navigate' || request.destination === 'document') {
+        event.respondWith(
+            fetch(request)
+                .then(response => {
+                    // Clone the response before caching
+                    const responseToCache = response.clone();
+                    
+                    // Update cache in background
+                    caches.open(CACHE_NAME).then(cache => {
+                        cache.put(request, responseToCache);
+                    });
+                    
+                    return response;
+                })
+                .catch(() => {
+                    // Fallback to cache
+                    return caches.match(request).then(response => {
+                        return response || caches.match('./index.html');
+                    });
+                })
+        );
+        return;
+    }
+
+    // Cache-first strategy for assets
     event.respondWith(
         caches.match(request)
             .then((response) => {
-                // Return cached version or fetch from network
-                return response || fetch(request).then((fetchResponse) => {
+                if (response) {
+                    // Return cached version
+                    return response;
+                }
+
+                // Not in cache, fetch from network
+                return fetch(request).then((fetchResponse) => {
                     // Don't cache non-successful responses
                     if (!fetchResponse || fetchResponse.status !== 200 || fetchResponse.type !== 'basic') {
                         return fetchResponse;
@@ -97,7 +143,7 @@ self.addEventListener('fetch', (event) => {
                     // Clone the response
                     const responseToCache = fetchResponse.clone();
 
-                    // Add to cache
+                    // Add to cache in background
                     caches.open(CACHE_NAME)
                         .then((cache) => {
                             cache.put(request, responseToCache);
@@ -107,12 +153,7 @@ self.addEventListener('fetch', (event) => {
                 });
             })
             .catch(() => {
-                // Offline fallback
-                if (request.destination === 'document') {
-                    return caches.match('./index.html');
-                }
-                
-                // Return placeholder for images
+                // Offline fallback for images
                 if (request.destination === 'image') {
                     return new Response(
                         '<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" fill="#999">Offline</text></svg>',
@@ -123,38 +164,59 @@ self.addEventListener('fetch', (event) => {
     );
 });
 
-// Handle API requests
+// Handle API requests with timeout
 async function handleApiRequest(request) {
     try {
-        // Always try network first for API requests
-        const networkResponse = await fetch(request);
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
         
-        // If successful, cache GET requests
-        if (request.method === 'GET' && networkResponse.ok) {
-            const cache = await caches.open(API_CACHE_NAME);
-            cache.put(request, networkResponse.clone());
-        }
-        
-        return networkResponse;
-    } catch (error) {
-        // Network failed, try cache for GET requests
-        if (request.method === 'GET') {
-            const cachedResponse = await caches.match(request);
-            if (cachedResponse) {
-                console.log('Service Worker: Serving API request from cache');
-                return cachedResponse;
+        try {
+            // Try network first with timeout
+            const networkResponse = await fetch(request, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
+            // If successful, cache GET requests
+            if (request.method === 'GET' && networkResponse.ok) {
+                const cache = await caches.open(API_CACHE_NAME);
+                cache.put(request, networkResponse.clone());
             }
+            
+            return networkResponse;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            
+            // If network failed or timeout, try cache for GET requests
+            if (request.method === 'GET') {
+                const cachedResponse = await caches.match(request);
+                if (cachedResponse) {
+                    console.log('Service Worker: Serving API request from cache');
+                    return cachedResponse;
+                }
+            }
+            
+            // Return offline response
+            return new Response(
+                JSON.stringify({
+                    error: true,
+                    message: 'You are offline. Please check your connection.'
+                }),
+                {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    headers: { 'Content-Type': 'application/json' }
+                }
+            );
         }
-        
-        // Return offline response
+    } catch (error) {
+        console.error('Service Worker: Error handling API request', error);
         return new Response(
             JSON.stringify({
                 error: true,
-                message: 'You are offline. Please check your connection.'
+                message: 'Service unavailable'
             }),
             {
                 status: 503,
-                statusText: 'Service Unavailable',
                 headers: { 'Content-Type': 'application/json' }
             }
         );
@@ -266,12 +328,28 @@ async function syncStories() {
         const clients = await self.clients.matchAll();
         clients.forEach(client => {
             client.postMessage({
+                type: 'sync-started'
+            });
+        });
+        
+        // Add actual sync logic here if needed
+        
+        clients.forEach(client => {
+            client.postMessage({
                 type: 'sync-completed',
                 syncedCount: 0
             });
         });
     } catch (error) {
         console.error('Service Worker: Sync failed', error);
+        
+        const clients = await self.clients.matchAll();
+        clients.forEach(client => {
+            client.postMessage({
+                type: 'sync-failed',
+                error: error.message
+            });
+        });
     }
 }
 
@@ -282,6 +360,42 @@ self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting();
     }
+    
+    // Handle cache clear request
+    if (event.data && event.data.type === 'CLEAR_CACHE') {
+        event.waitUntil(
+            caches.keys().then(cacheNames => {
+                return Promise.all(
+                    cacheNames.map(cacheName => {
+                        console.log('Clearing cache:', cacheName);
+                        return caches.delete(cacheName);
+                    })
+                );
+            }).then(() => {
+                event.ports[0].postMessage({ success: true });
+            }).catch(error => {
+                event.ports[0].postMessage({ success: false, error: error.message });
+            })
+        );
+    }
 });
+
+// Clean old caches periodically
+async function cleanOldCaches() {
+    const cacheWhitelist = [CACHE_NAME, API_CACHE_NAME];
+    const cacheNames = await caches.keys();
+    
+    await Promise.all(
+        cacheNames.map(async (cacheName) => {
+            if (!cacheWhitelist.includes(cacheName)) {
+                console.log('Deleting old cache:', cacheName);
+                await caches.delete(cacheName);
+            }
+        })
+    );
+}
+
+// Run cleanup periodically
+setInterval(cleanOldCaches, 60 * 60 * 1000); // Every hour
 
 console.log('Service Worker: Loaded successfully');
