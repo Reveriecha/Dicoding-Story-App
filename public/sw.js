@@ -242,10 +242,15 @@ self.addEventListener('push', (event) => {
     if (event.data) {
         try {
             const pushData = event.data.json();
-            notificationData = { ...notificationData, ...pushData };
+            console.log('Push data received:', pushData);
             
-            // Use the specific message format from the API
+            // Handle the API notification schema
+            if (pushData.title) {
+                notificationData.title = pushData.title;
+            }
+            
             if (pushData.options) {
+                // Merge options from push data
                 notificationData = {
                     ...notificationData,
                     ...pushData.options,
@@ -254,7 +259,11 @@ self.addEventListener('push', (event) => {
             }
         } catch (error) {
             console.error('Error parsing push data:', error);
-            notificationData.body = event.data.text() || notificationData.body;
+            // Try to get text if JSON parsing fails
+            const text = event.data.text();
+            if (text) {
+                notificationData.body = text;
+            }
         }
     }
 
@@ -264,16 +273,16 @@ self.addEventListener('push', (event) => {
             icon: notificationData.icon,
             badge: notificationData.badge,
             tag: notificationData.tag,
-            data: notificationData.data,
+            data: notificationData.data || {},
             requireInteraction: false,
-            actions: [
+            actions: notificationData.actions || [
                 {
                     action: 'view',
-                    title: 'View'
+                    title: 'Lihat'
                 },
                 {
                     action: 'dismiss',
-                    title: 'Dismiss'
+                    title: 'Tutup'
                 }
             ]
         })
