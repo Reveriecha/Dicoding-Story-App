@@ -355,6 +355,7 @@ class DicodingStoryApp {
             getCurrentPage: () => this.currentPage,
             isAuthenticated: () => this.models.authModel.isAuthenticated(),
             getCurrentUser: () => this.models.authModel.getUser(),
+            updateNotificationButtonStatus: () => this.presenters.authPresenter.updateNotificationButtonStatus(),
             version: this.appVersion
         };
         
