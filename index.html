@@ -19,24 +19,24 @@
     <link rel="manifest" href="manifest.json">
     
     <!-- Favicons and App Icons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png">
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png">
-    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.png">
-    <link rel="apple-touch-icon" sizes="120x120" href="/icons/icon-128x128.png">
-    <link rel="apple-touch-icon" sizes="114x114" href="/icons/icon-128x128.png">
-    <link rel="apple-touch-icon" sizes="76x76" href="/icons/icon-72x72.png">
-    <link rel="apple-touch-icon" sizes="72x72" href="/icons/icon-72x72.png">
-    <link rel="apple-touch-icon" sizes="60x60" href="/icons/icon-72x72.png">
-    <link rel="apple-touch-icon" sizes="57x57" href="/icons/icon-72x72.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="public/icons/icon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="public/icons/icon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="public/icons/icon-192x192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="public/icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="public/icons/icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="public/icons/icon-128x128.png">
+    <link rel="apple-touch-icon" sizes="114x114" href="public/icons/icon-128x128.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="public/icons/icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="72x72" href="public/icons/icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="60x60" href="public/icons/icon-72x72.png">
+    <link rel="apple-touch-icon" sizes="57x57" href="public/icons/icon-72x72.png">
     
     <!-- Microsoft Tiles -->
-    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png">
-    <meta name="msapplication-square70x70logo" content="/icons/icon-72x72.png">
-    <meta name="msapplication-square150x150logo" content="/icons/icon-152x152.png">
-    <meta name="msapplication-wide310x150logo" content="/icons/icon-384x384.png">
-    <meta name="msapplication-square310x310logo" content="/icons/icon-384x384.png">
+    <meta name="msapplication-TileImage" content="public/icons/icon-144x144.png">
+    <meta name="msapplication-square70x70logo" content="public/icons/icon-72x72.png">
+    <meta name="msapplication-square150x150logo" content="public/icons/icon-152x152.png">
+    <meta name="msapplication-wide310x150logo" content="public/icons/icon-384x384.png">
+    <meta name="msapplication-square310x310logo" content="public/icons/icon-384x384.png">
     
     <!-- External CSS - Will be cached by Service Worker -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
@@ -734,39 +734,30 @@
             document.getElementById('offline-indicator').classList.add('show');
         }
 
-        // Handle service worker updates
+        // Register service worker
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.addEventListener('controllerchange', () => {
-                window.location.reload();
-            });
+            window.addEventListener('load', async () => {
+                try {
+                    const registration = await navigator.serviceWorker.register('./sw.js', {
+                        scope: './'
+                    });
+                    console.log('ServiceWorker registration successful:', registration);
 
-            // Handle update notification
-            navigator.serviceWorker.getRegistration().then(registration => {
-                if (registration) {
+                    // Check for updates
                     registration.addEventListener('updatefound', () => {
                         const newWorker = registration.installing;
                         newWorker.addEventListener('statechange', () => {
                             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                document.getElementById('update-indicator').classList.add('show');
+                                console.log('New service worker available');
+                                // You can show an update notification here
                             }
                         });
                     });
+                } catch (error) {
+                    console.error('ServiceWorker registration failed:', error);
                 }
             });
         }
-
-        // Handle update button click
-        document.getElementById('update-btn').addEventListener('click', () => {
-            document.getElementById('update-indicator').classList.remove('show');
-            
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistration().then(registration => {
-                    if (registration && registration.waiting) {
-                        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-                    }
-                });
-            }
-        });
 
         // Handle share target (if app was opened via share)
         if ('URLSearchParams' in window) {
