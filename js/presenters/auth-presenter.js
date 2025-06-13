@@ -466,53 +466,297 @@ export class AuthPresenter {
 
     // Enable notifications for logged-in user
     async enableNotifications() {
-        if (!this.pushNotificationManager) {
-            throw new Error('Push notification manager not available');
-        }
+    if (!this.pushNotificationManager) {
+        throw new Error('Push notification manager not available');
+    }
 
-        const user = this.model.getUser();
-        if (!user) {
-            throw new Error('User not logged in');
-        }
+    const user = this.model.getUser();
+    if (!user) {
+        throw new Error('User not logged in');
+    }
 
-        const granted = await this.pushNotificationManager.requestPermission();
-        if (granted) {
-            const subscription = await this.pushNotificationManager.subscribe();
-            if (subscription) {
-                await this.pushNotificationManager.sendSubscriptionToServer(subscription);
-                
-                // Send welcome notification
-                setTimeout(() => {
-                    this.pushNotificationManager.triggerWelcomeNotification(user.name);
-                }, 1000);
-                
-                return true;
-            }
-        }
+    const authToken = this.model.getToken();
+    if (!authToken) {
+        throw new Error('Authentication token not found');
+    }
+
+    try {
+        // Subscribe with auth token
+        const result = await this.pushNotificationManager.subscribeWithAuth(authToken);
         
+        if (result.success) {
+            this.view.showSuccess('Notifikasi berhasil diaktifkan!');
+            
+            // Send welcome notification
+            setTimeout(() => {
+                this.pushNotificationManager.triggerWelcomeNotification(user.name);
+            }, 1000);
+            
+            return true;
+        }
+    } catch (error) {
+        console.error('Error enabling notifications:', error);
+        this.view.showError('Gagal mengaktifkan notifikasi: ' + error.message);
+        return false;
+    }
+}
+
+// Disable notifications dengan auth token
+async disableNotifications() {
+    if (!this.pushNotificationManager) {
         return false;
     }
 
-    // Disable notifications
-    async disableNotifications() {
-        if (!this.pushNotificationManager) {
-            return false;
-        }
-
+    const authToken = this.model.getToken();
+    if (!authToken) {
+        console.warn('No auth token available for unsubscribe');
+        // Still try to unsubscribe locally
         return await this.pushNotificationManager.unsubscribe();
     }
 
-    // Get notification status
-    getNotificationStatus() {
-        if (!this.pushNotificationManager) {
-            return { isSupported: false, permission: 'default', isSubscribed: false };
+    try {
+        const result = await this.pushNotificationManager.unsubscribeWithAuth(authToken);
+        
+        if (result.success) {
+            this.view.showSuccess('Notifikasi berhasil dinonaktifkan');
+            return true;
+        }
+    } catch (error) {
+        console.error('Error disabling notifications:', error);
+        this.view.showError('Gagal menonaktifkan notifikasi: ' + error.message);
+        return false;
+    }
+}
+
+// Handle login success dengan prompt notifikasi
+async handleLoginSuccess(response) {
+    try {
+        // Save user data and token
+        this.model.setUser({
+            name: response.loginResult.name,
+            userId: response.loginResult.userId,
+            token: response.loginResult.token,
+            loginTime: new Date().toISOString()
+        });
+
+        this.view.showSuccess(`Selamat datang, ${response.loginResult.name}!`);
+        
+        // Navigate to home
+        if (window.app && window.app.router) {
+            window.app.router.navigate('home');
         }
 
-        return this.pushNotificationManager.getSubscriptionStatus();
-    }
+        // Check notification status and prompt if needed
+        if (this.pushNotificationManager) {
+            const status = this.pushNotificationManager.getSubscriptionStatus();
+            
+            if (status.isSupported && status.permission === 'default') {
+                // Delay prompt untuk UX yang lebih baik
+                setTimeout(() => {
+                    this.promptNotificationPermission(response.loginResult.name, response.loginResult.token);
+                }, 2000);
+            } else if (status.isSupported && status.permission === 'granted' && !status.isSubscribed) {
+                // Permission granted but not subscribed, auto-subscribe
+                try {
+                    await this.pushNotificationManager.subscribeWithAuth(response.loginResult.token);
+                } catch (error) {
+                    console.error('Auto-subscribe failed:', error);
+                }
+            }
+        }
 
-    // Handle cleanup
-    cleanup() {
-        this.model.removeObserver(this);
+        // Notify observers
+        this.model.notifyObservers('onLoginSuccess');
+        
+    } catch (error) {
+        console.error('Error in handleLoginSuccess:', error);
+        this.view.showError('Login berhasil tetapi terjadi kesalahan');
     }
+}
+
+// Prompt untuk notification permission dengan UI yang lebih baik
+async promptNotificationPermission(userName, authToken) {
+    const promptDiv = document.createElement('div');
+    promptDiv.className = 'notification-prompt-overlay';
+    promptDiv.innerHTML = `
+        <div class="notification-prompt-card">
+            <div class="prompt-header">
+                <i class="fas fa-bell prompt-icon"></i>
+                <h3>Aktifkan Notifikasi?</h3>
+            </div>
+            <p>Hai ${userName}! Dapatkan pemberitahuan real-time saat ada story baru dari pengguna lain.</p>
+            <div class="prompt-buttons">
+                <button id="prompt-later" class="btn-secondary">Nanti Saja</button>
+                <button id="prompt-enable" class="btn-primary">Aktifkan Sekarang</button>
+            </div>
+        </div>
+    `;
+
+    // Add styles
+    const style = document.createElement('style');
+    style.textContent = `
+        .notification-prompt-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .notification-prompt-card {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            animation: slideUp 0.3s ease;
+        }
+        
+        .prompt-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .prompt-icon {
+            font-size: 2.5rem;
+            color: #667eea;
+        }
+        
+        .notification-prompt-card h3 {
+            margin: 0;
+            color: #333;
+        }
+        
+        .notification-prompt-card p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+        }
+        
+        .prompt-buttons {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .prompt-buttons button {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #666;
+        }
+        
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5a6cd8;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    `;
+
+    document.head.appendChild(style);
+    document.body.appendChild(promptDiv);
+
+    // Handle button clicks
+    document.getElementById('prompt-enable').addEventListener('click', async () => {
+        document.body.removeChild(promptDiv);
+        document.head.removeChild(style);
+        
+        try {
+            const result = await this.pushNotificationManager.subscribeWithAuth(authToken);
+            
+            if (result.success) {
+                this.view.showSuccess('Notifikasi berhasil diaktifkan!');
+                
+                // Send welcome notification
+                setTimeout(() => {
+                    this.pushNotificationManager.triggerWelcomeNotification(userName);
+                }, 1000);
+            }
+            
+            // Update notification button status in header
+            if (window.app && window.app.updateNotificationButtonStatus) {
+                window.app.updateNotificationButtonStatus();
+            }
+        } catch (error) {
+            console.error('Error enabling notifications:', error);
+            this.view.showError('Gagal mengaktifkan notifikasi');
+        }
+    });
+
+    document.getElementById('prompt-later').addEventListener('click', () => {
+        document.body.removeChild(promptDiv);
+        document.head.removeChild(style);
+    });
+}
+
+// Handle logout dengan cleanup notification
+async handleLogout() {
+    try {
+        // Unsubscribe dari push notifications jika ada
+        if (this.pushNotificationManager) {
+            const status = this.pushNotificationManager.getSubscriptionStatus();
+            if (status.isSubscribed) {
+                const authToken = this.model.getToken();
+                if (authToken) {
+                    await this.pushNotificationManager.unsubscribeWithAuth(authToken);
+                }
+            }
+        }
+
+        // Clear user data
+        this.model.logout();
+        
+        // Navigate to login
+        if (window.app && window.app.router) {
+            window.app.router.navigate('login');
+        }
+
+        this.view.showSuccess('Berhasil logout');
+        
+        // Notify observers
+        this.model.notifyObservers('onLogout');
+        
+    } catch (error) {
+        console.error('Error during logout:', error);
+        // Still logout even if unsubscribe fails
+        this.model.logout();
+        if (window.app && window.app.router) {
+            window.app.router.navigate('login');
+        }
+    }
+}
 }
