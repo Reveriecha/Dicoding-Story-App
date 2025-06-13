@@ -5,6 +5,7 @@ export class PushNotificationManager {
         this.subscription = null;
         this.swRegistration = null;
         this.isSupported = this.checkSupport();
+        this.apiBaseUrl = 'https://story-api.dicoding.dev/v1';
     }
 
     // Check browser support
@@ -30,11 +31,54 @@ export class PushNotificationManager {
             // Check existing subscription
             this.subscription = await this.swRegistration.pushManager.getSubscription();
             
+            // Load saved subscription from localStorage
+            if (!this.subscription) {
+                const savedSubscription = this.loadSubscription();
+                if (savedSubscription) {
+                    this.subscription = savedSubscription;
+                }
+            }
+            
             return true;
         } catch (error) {
             console.error('Error initializing push notifications:', error);
             return false;
         }
+    }
+
+    // Convert VAPID key
+    urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding)
+            .replace(/\-/g, '+')
+            .replace(/_/g, '/');
+
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    }
+
+    // Save subscription to localStorage
+    saveSubscription(subscription) {
+        if (subscription) {
+            localStorage.setItem('push-subscription', JSON.stringify(subscription));
+        }
+    }
+
+    // Load subscription from localStorage
+    loadSubscription() {
+        const saved = localStorage.getItem('push-subscription');
+        return saved ? JSON.parse(saved) : null;
+    }
+
+    // Remove subscription from localStorage
+    removeSubscription() {
+        localStorage.removeItem('push-subscription');
+        localStorage.removeItem('push-subscription-id');
     }
 
     // Request notification permission
@@ -119,33 +163,148 @@ export class PushNotificationManager {
         }
     }
 
-    // Send subscription to server (simulate API call)
-    async sendSubscriptionToServer(subscription) {
+    // Send subscription to server - FIXED to use correct endpoint and format
+    async sendSubscriptionToServer(subscription, authToken) {
         try {
-            // In real app, you would send this to your backend
-            console.log('Sending subscription to server:', subscription);
+            // Check if auth token is provided
+            if (!authToken) {
+                throw new Error('Authentication token required');
+            }
+
+            const subscriptionJSON = subscription.toJSON();
             
-            // Simulate API call
-            const response = await fetch('/api/push/subscribe', {
+            // Prepare request body according to API spec
+            const requestBody = {
+                endpoint: subscriptionJSON.endpoint,
+                keys: {
+                    p256dh: subscriptionJSON.keys.p256dh,
+                    auth: subscriptionJSON.keys.auth
+                }
+            };
+
+            console.log('Sending subscription to server:', requestBody);
+
+            const response = await fetch(`${this.apiBaseUrl}/notifications/subscribe`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                body: JSON.stringify({
-                    subscription: subscription,
-                    userAgent: navigator.userAgent
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
-                throw new Error('Failed to send subscription to server');
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to send subscription to server');
             }
 
-            return await response.json();
+            const responseData = await response.json();
+            console.log('Subscription sent successfully:', responseData);
+            
+            // Store subscription ID if returned
+            if (responseData.data && responseData.data.id) {
+                localStorage.setItem('push-subscription-id', responseData.data.id);
+            }
+            
+            return responseData;
         } catch (error) {
-            // For demo purposes, just log the subscription
-            console.log('Demo: Subscription would be sent to server:', subscription);
-            return { success: true, message: 'Subscription saved (demo mode)' };
+            console.error('Error sending subscription to server:', error);
+            throw error;
+        }
+    }
+
+    // Unsubscribe from server - FIXED to use correct request format
+    async unsubscribeFromServer(authToken) {
+        try {
+            if (!authToken) {
+                throw new Error('Authentication token required');
+            }
+
+            if (!this.subscription) {
+                throw new Error('No active subscription');
+            }
+
+            const subscriptionJSON = this.subscription.toJSON();
+            
+            // Request body only needs endpoint for unsubscribe
+            const requestBody = {
+                endpoint: subscriptionJSON.endpoint
+            };
+
+            console.log('Unsubscribing from server:', requestBody);
+
+            const response = await fetch(`${this.apiBaseUrl}/notifications/subscribe`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to unsubscribe from server');
+            }
+
+            const responseData = await response.json();
+            console.log('Unsubscribed from server successfully:', responseData);
+            
+            // Clear stored subscription ID
+            localStorage.removeItem('push-subscription-id');
+            
+            return responseData;
+        } catch (error) {
+            console.error('Error unsubscribing from server:', error);
+            throw error;
+        }
+    }
+
+    // Full subscribe flow with server registration
+    async subscribeWithAuth(authToken) {
+        try {
+            // First subscribe to push manager
+            const subscription = await this.subscribe();
+            
+            // Then send to server
+            const serverResponse = await this.sendSubscriptionToServer(subscription, authToken);
+            
+            return {
+                subscription,
+                serverResponse,
+                success: true
+            };
+        } catch (error) {
+            console.error('Error in full subscribe flow:', error);
+            
+            // If subscription exists but server failed, unsubscribe locally
+            if (this.subscription) {
+                await this.unsubscribe();
+            }
+            
+            throw error;
+        }
+    }
+
+    // Full unsubscribe flow with server unregistration
+    async unsubscribeWithAuth(authToken) {
+        try {
+            // First unsubscribe from server
+            if (authToken && this.subscription) {
+                await this.unsubscribeFromServer(authToken);
+            }
+            
+            // Then unsubscribe locally
+            await this.unsubscribe();
+            
+            return { success: true };
+        } catch (error) {
+            console.error('Error in full unsubscribe flow:', error);
+            
+            // Even if server unsubscribe fails, try to unsubscribe locally
+            await this.unsubscribe();
+            
+            throw error;
         }
     }
 
@@ -186,34 +345,46 @@ export class PushNotificationManager {
         }
     }
 
-    // Trigger test notification for new story
+    // Trigger test notification for new story - following API schema exactly
     triggerStoryNotification(storyData) {
-        this.showLocalNotification('New Story Added!', {
-            body: `${storyData.name} shared a new story: "${storyData.description.substring(0, 50)}..."`,
-            icon: '/icons/icon-192x192.png',
-            data: {
-                type: 'new-story',
-                storyId: storyData.id,
-                url: '/#home'
-            },
-            actions: [
-                {
-                    action: 'view-story',
-                    title: 'View Story'
+        // Follow the exact JSON schema from API
+        const notificationData = {
+            title: 'Story berhasil dibuat',
+            options: {
+                body: `Anda telah membuat story baru dengan deskripsi: ${storyData.description.substring(0, 50)}${storyData.description.length > 50 ? '...' : ''}`,
+                icon: '/icons/icon-192x192.png',
+                badge: '/icons/icon-72x72.png',
+                tag: 'dicoding-story',
+                data: {
+                    type: 'new-story',
+                    storyId: storyData.id,
+                    url: '/#home'
                 },
-                {
-                    action: 'dismiss',
-                    title: 'Dismiss'
-                }
-            ]
-        });
+                requireInteraction: false,
+                actions: [
+                    {
+                        action: 'view',
+                        title: 'Lihat Story'
+                    },
+                    {
+                        action: 'dismiss',
+                        title: 'Tutup'
+                    }
+                ]
+            }
+        };
+
+        // For local notification (not from push event)
+        this.showLocalNotification(notificationData.title, notificationData.options);
     }
 
     // Trigger welcome notification
     triggerWelcomeNotification(userName) {
-        this.showLocalNotification('Welcome to Dicoding Story!', {
-            body: `Hi ${userName}! You can now receive notifications about new stories.`,
+        this.showLocalNotification('Selamat datang di Dicoding Story!', {
+            body: `Hai ${userName}! Anda akan menerima notifikasi saat ada story baru.`,
             icon: '/icons/icon-192x192.png',
+            badge: '/icons/icon-72x72.png',
+            tag: 'dicoding-story-welcome',
             data: {
                 type: 'welcome',
                 url: '/#home'
@@ -221,52 +392,7 @@ export class PushNotificationManager {
         });
     }
 
-    // Convert VAPID key from base64 to Uint8Array
-    urlBase64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding)
-            .replace(/\-/g, '+')
-            .replace(/_/g, '/');
-
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-    }
-
-    // Save subscription to localStorage
-    saveSubscription(subscription) {
-        try {
-            localStorage.setItem('push-subscription', JSON.stringify(subscription));
-        } catch (error) {
-            console.error('Error saving subscription:', error);
-        }
-    }
-
-    // Load subscription from localStorage
-    loadSubscription() {
-        try {
-            const subscriptionData = localStorage.getItem('push-subscription');
-            return subscriptionData ? JSON.parse(subscriptionData) : null;
-        } catch (error) {
-            console.error('Error loading subscription:', error);
-            return null;
-        }
-    }
-
-    // Remove subscription from localStorage
-    removeSubscription() {
-        try {
-            localStorage.removeItem('push-subscription');
-        } catch (error) {
-            console.error('Error removing subscription:', error);
-        }
-    }
-
-    // Get subscription status
+    // Get current subscription status
     getSubscriptionStatus() {
         return {
             isSupported: this.isSupported,
@@ -305,11 +431,11 @@ export class PushNotificationManager {
                         <div class="permission-dialog-icon">
                             <i class="fas fa-bell" style="font-size: 2rem; color: #667eea;"></i>
                         </div>
-                        <h3>Enable Notifications</h3>
-                        <p>Get notified when new stories are shared by other users!</p>
+                        <h3>Aktifkan Notifikasi</h3>
+                        <p>Dapatkan pemberitahuan saat ada story baru!</p>
                         <div class="permission-dialog-buttons">
-                            <button class="btn btn-secondary" id="permission-deny">Not Now</button>
-                            <button class="btn" id="permission-allow">Enable</button>
+                            <button class="btn-cancel" onclick="this.closest('.notification-permission-dialog').remove()">Nanti</button>
+                            <button class="btn-enable" onclick="this.closest('.notification-permission-dialog').dispatchEvent(new Event('enable'))">Aktifkan</button>
                         </div>
                     </div>
                 </div>
@@ -322,76 +448,101 @@ export class PushNotificationManager {
                     position: fixed;
                     top: 0;
                     left: 0;
-                    width: 100%;
-                    height: 100%;
-                    z-index: 10000;
+                    right: 0;
+                    bottom: 0;
+                    z-index: 9999;
                 }
                 .permission-dialog-overlay {
-                    width: 100%;
-                    height: 100%;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
                     background: rgba(0, 0, 0, 0.5);
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    padding: 20px;
+                    padding: 1rem;
                 }
                 .permission-dialog-content {
                     background: white;
-                    border-radius: 15px;
+                    border-radius: 12px;
                     padding: 2rem;
                     max-width: 400px;
+                    width: 100%;
                     text-align: center;
-                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
                 }
                 .permission-dialog-icon {
                     margin-bottom: 1rem;
                 }
                 .permission-dialog-content h3 {
-                    margin: 0 0 1rem 0;
+                    margin: 0 0 0.5rem 0;
                     color: #333;
                 }
                 .permission-dialog-content p {
-                    margin: 0 0 2rem 0;
+                    margin: 0 0 1.5rem 0;
                     color: #666;
-                    line-height: 1.5;
                 }
                 .permission-dialog-buttons {
                     display: flex;
                     gap: 1rem;
                     justify-content: center;
                 }
-                .permission-dialog-buttons .btn {
-                    flex: 1;
-                    max-width: 150px;
+                .permission-dialog-buttons button {
+                    padding: 0.75rem 1.5rem;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 1rem;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                }
+                .btn-cancel {
+                    background: #e0e0e0;
+                    color: #666;
+                }
+                .btn-cancel:hover {
+                    background: #d0d0d0;
+                }
+                .btn-enable {
+                    background: #667eea;
+                    color: white;
+                }
+                .btn-enable:hover {
+                    background: #5a6cd8;
                 }
             `;
 
             document.head.appendChild(style);
             document.body.appendChild(dialog);
 
-            // Handle button clicks
-            document.getElementById('permission-allow').addEventListener('click', async () => {
-                document.body.removeChild(dialog);
-                document.head.removeChild(style);
+            // Handle enable event
+            dialog.addEventListener('enable', async () => {
+                dialog.remove();
+                style.remove();
                 
                 const granted = await this.requestPermission();
                 resolve(granted);
             });
 
-            document.getElementById('permission-deny').addEventListener('click', () => {
-                document.body.removeChild(dialog);
-                document.head.removeChild(style);
-                resolve(false);
-            });
-
             // Handle overlay click
-            dialog.addEventListener('click', (e) => {
-                if (e.target === dialog.querySelector('.permission-dialog-overlay')) {
-                    document.body.removeChild(dialog);
-                    document.head.removeChild(style);
+            dialog.querySelector('.permission-dialog-overlay').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) {
+                    dialog.remove();
+                    style.remove();
                     resolve(false);
                 }
             });
         });
     }
+}
+
+// Singleton instance
+let pushNotificationManagerInstance = null;
+
+export function getPushNotificationManager() {
+    if (!pushNotificationManagerInstance) {
+        pushNotificationManagerInstance = new PushNotificationManager();
+    }
+    return pushNotificationManagerInstance;
 }
