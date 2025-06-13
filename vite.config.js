@@ -1,8 +1,10 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 
 export default defineConfig({
   root: '.',
   base: './',
+  publicDir: 'public',
   server: {
     port: 3000,
     host: true,
@@ -22,7 +24,8 @@ export default defineConfig({
       input: {
         main: './index.html'
       }
-    }
+    },
+    copyPublicDir: true
   },
   preview: {
     port: 3000,
