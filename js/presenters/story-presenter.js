@@ -52,31 +52,31 @@ export class StoryPresenter {
     }
 
     onStoryAdded(story) {
-        this.view.showSuccess('Story added successfully!');
-        this.view.resetAddStoryForm();
-        
-        // Stop camera after adding story
-        if (this.cameraManager) {
-            this.cameraManager.stopCamera();
-        }
-        
-        // Send push notification about new story
-        this.handleNewStoryNotification(story);
-        
-        // Clear current draft ID if editing
-        if (window.currentDraftId) {
-            // Delete the draft since it's now uploaded
-            if (this.offlineManager) {
-                this.offlineManager.indexedDBManager.deleteDraft(window.currentDraftId);
-            }
-            window.currentDraftId = null;
-        }
-        
-        // Navigate to home
-        if (window.app && window.app.router) {
-            window.app.router.navigate('home');
-        }
+    console.log('Story added successfully:', story);
+    this.view.showSuccess('Story berhasil ditambahkan!');
+    this.view.resetAddStoryForm();
+    
+    // Stop camera after adding story
+    if (this.cameraManager) {
+        this.cameraManager.stopCamera();
     }
+    
+    // Send push notification about new story
+    this.handleNewStoryNotification(story);
+    
+    // Clear current draft ID if editing
+    if (window.currentDraftId) {
+        if (this.offlineManager) {
+            this.offlineManager.indexedDBManager.deleteDraft(window.currentDraftId);
+        }
+        window.currentDraftId = null;
+    }
+    
+    // Navigate to home
+    if (window.app && window.app.router) {
+        window.app.router.navigate('home');
+    }
+}
 
     onStoriesCleared() {
         this.view.renderStories([]);
@@ -84,31 +84,25 @@ export class StoryPresenter {
 
     // Handle new story notification
     handleNewStoryNotification(story) {
-        if (!this.pushNotificationManager) return;
+    if (!this.pushNotificationManager) return;
 
-        try {
-            const status = this.pushNotificationManager.getSubscriptionStatus();
+    try {
+        const status = this.pushNotificationManager.getSubscriptionStatus();
+        
+        if (status.isSubscribed && status.permission === 'granted') {
+            const storyData = {
+                id: story.id || Date.now().toString(),
+                description: story.description || 'New story shared!'
+            };
             
-            if (status.isSubscribed) {
-                // Get current user to avoid sending notification to self
-                const currentUser = this.authModel.getUser();
-                
-                // Create story data for notification
-                const storyData = {
-                    id: story.id || Date.now(),
-                    name: currentUser ? currentUser.name : 'Anonymous',
-                    description: story.description || 'New story shared!'
-                };
-                
-                // Send notification after a brief delay
-                setTimeout(() => {
-                    this.pushNotificationManager.triggerStoryNotification(storyData);
-                }, 1500);
-            }
-        } catch (error) {
-            console.error('Error sending story notification:', error);
+            this.pushNotificationManager.triggerStoryNotification(storyData);
+            
+            console.log('Story notification triggered:', storyData);
         }
+    } catch (error) {
+        console.error('Error triggering story notification:', error);
     }
+}
 
     // Load stories dari API atau cache
     async loadStories() {
@@ -208,71 +202,108 @@ export class StoryPresenter {
 
     // Handle add story (dengan offline support)
     async handleAddStory(description, lat, lon) {
-        try {
-            // Validate data
-            const photo = this.cameraManager ? this.cameraManager.getCapturedPhoto() : null;
-            const validation = this.model.validateStoryData(description, photo);
-            
-            if (!validation.isValid) {
-                this.view.showErrorMessage(validation.errors.join(', '));
-                return;
-            }
-
-            // Show loading state
-            this.showAddStoryLoading(true);
-
-            // Check if online
-            if (!navigator.onLine) {
-                // Offline: save as draft
-                return await this.handleOfflineStorySubmission(description, photo, lat, lon);
-            }
-
-            // Online: prepare form data and submit
-            const formData = new FormData();
-            formData.append('description', description);
-            formData.append('photo', photo, 'story.jpg');
-            
-            if (lat && lon) {
-                formData.append('lat', parseFloat(lat));
-                formData.append('lon', parseFloat(lon));
-            }
-
-            // Submit story
-            let response;
-            if (this.authModel.isAuthenticated()) {
-                response = await this.apiService.addStory(this.authModel.getToken(), formData);
-            } else {
-                throw new Error('Authentication required');
-            }
-
-            // Create story object for notification
-            const newStory = {
-                id: response.storyId || Date.now(),
-                description: description,
-                lat: lat ? parseFloat(lat) : null,
-                lon: lon ? parseFloat(lon) : null,
-                createdAt: new Date().toISOString()
-            };
-
-            // Reload stories
-            await this.loadStories();
-            
-            // Notify success (this will trigger notification)
-            this.model.notifyObservers('onStoryAdded', newStory);
-            
-        } catch (error) {
-            console.error('Error adding story:', error);
-            
-            if (error.message.includes('Network error') || error.message.includes('fetch')) {
-                // Network error: save offline
-                await this.handleOfflineStorySubmission(description, photo, lat, lon);
-            } else {
-                this.view.showErrorMessage(error.message || 'Failed to add story. Please try again.');
-            }
-        } finally {
-            this.showAddStoryLoading(false);
+    try {
+        // Validate data
+        const photo = this.cameraManager ? this.cameraManager.getCapturedPhoto() : null;
+        const validation = this.model.validateStoryData(description, photo);
+        
+        if (!validation.isValid) {
+            this.view.showErrorMessage(validation.errors.join(', '));
+            return;
         }
+
+        // Show loading state
+        this.showAddStoryLoading(true);
+
+        // Check if online
+        if (!navigator.onLine) {
+            // Offline: save as draft
+            return await this.handleOfflineStorySubmission(description, photo, lat, lon);
+        }
+
+        // Online: prepare form data and submit
+        const formData = new FormData();
+        formData.append('description', description);
+        formData.append('photo', photo, 'story.jpg');
+        
+        if (lat && lon) {
+            formData.append('lat', parseFloat(lat));
+            formData.append('lon', parseFloat(lon));
+        }
+
+        // Submit story
+        let response;
+        if (this.authModel.isAuthenticated()) {
+            response = await this.apiService.addStory(this.authModel.getToken(), formData);
+        } else {
+            throw new Error('Authentication required');
+        }
+
+        // Create story object for notification
+        const newStory = {
+            id: response.storyId || Date.now().toString(),
+            description: description,
+            lat: lat ? parseFloat(lat) : null,
+            lon: lon ? parseFloat(lon) : null,
+            createdAt: new Date().toISOString()
+        };
+
+        // Reload stories
+        await this.loadStories();
+        
+        // Notify success (this will trigger notification)
+        this.model.notifyObservers('onStoryAdded', newStory);
+        
+    } catch (error) {
+        console.error('Error adding story:', error);
+        
+        if (error.message.includes('Network error') || error.message.includes('fetch')) {
+            // Network error: save offline
+            await this.handleOfflineStorySubmission(description, photo, lat, lon);
+        } else {
+            this.view.showErrorMessage(error.message || 'Failed to add story. Please try again.');
+        }
+    } finally {
+        this.showAddStoryLoading(false);
     }
+}
+
+// Test notification feature untuk development
+async triggerTestNotification() {
+    if (!this.pushNotificationManager) {
+        console.warn('Push notification manager not available');
+        this.view.showErrorMessage('Push notification tidak tersedia');
+        return;
+    }
+
+    const status = this.pushNotificationManager.getSubscriptionStatus();
+    
+    if (!status.isSupported) {
+        this.view.showErrorMessage('Browser tidak mendukung push notification');
+        return;
+    }
+    
+    if (status.permission === 'denied') {
+        this.view.showErrorMessage('Permission notifikasi ditolak. Silakan aktifkan di pengaturan browser.');
+        return;
+    }
+    
+    if (!status.isSubscribed) {
+        this.view.showErrorMessage('Silakan aktifkan notifikasi terlebih dahulu.');
+        return;
+    }
+
+    // Create test story data
+    const currentUser = this.authModel.getUser();
+    const testStory = {
+        id: 'test-' + Date.now(),
+        description: 'Ini adalah test notification untuk story baru! Lorem ipsum dolor sit amet.'
+    };
+
+    // Trigger notification
+    this.pushNotificationManager.triggerStoryNotification(testStory);
+    this.view.showSuccess('Test notification berhasil dikirim!');
+}
 
     // Handle offline story submission
     async handleOfflineStorySubmission(description, photo, lat, lon) {
